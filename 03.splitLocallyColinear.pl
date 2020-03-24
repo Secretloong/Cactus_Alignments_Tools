@@ -9,6 +9,8 @@ This script is used to make sure the homolog group coordinates with the order of
   Version: 1.0,  Date: 2019-02-14
   Version: 2.0,  Date: 2019-03-29, Modified: change the @c to @{$hash{$split_tag}} so that the coordinates would be correct among more than one splits.
   Version: 2.1,  Date: 2019-03-30, Modified: change the line45 from $seq to $seg{$split_tag} so that there no wrong dump with the sequence splits.
+  Version: 2.2,  Date: 2019-12-10, Modified: Debug the coodinates redundancy of merging neighboring blocks when split the INDEL out which was reported by YuanDeng.
+  Version: 2.3,  Date: 2020-02-28, Modified: Debug the split length ($s) error when the alignments could be merged.
 
 =head1 Usage Exmples
 
@@ -46,8 +48,10 @@ while(<IN>){
                 for(my $j=$#{$hash{$split_tag}};$j>0;$j-=2){
                     if($hash{$split_tag}[$j]<$c[$i+2]){
                         last;
-                    }elsif($hash{$split_tag}[$j]==$c[$i+2]){
+                    }elsif($hash{$split_tag}[$j]==$c[$i+2]){ 
                         $hash{$split_tag}[-1]=$c[$i+3];
+                        $s+=$c[$i+3]-$c[$i+2]; ##debug by fangqi at 20200228
+                        $i+=2; ##debug by fangqi at 20191210
                         last;
                     }else{
                         unshift @{$hash{$split_tag+$tag}}, ($hash{$split_tag}[$j-1],$hash{$split_tag}[$j]);
