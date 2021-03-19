@@ -26,6 +26,12 @@ This script is used to merge the best homology groups:
                                           2. initail the $last_i (=-1) when the homology groups selection went back to the first rank groups.
   Version: 3.0,  Date: 2019-09-11 Modified: discard Method 1 and 2; add --ortholog to output the longest and most identical locally colinear alignments
   Version: 3.1,  Date: 2019-09-17 Modified: add test to sequences only with N; add "n" to "N" identification (some alignments having masked n); change $/ back to \n
+  Version: 3.2,  Date: 2020-05-07 Modified: debug the coordinates within the total "n" or "N" blocks, don't affect the alignments
+  Version: 3.3,  Date: 2020-09-15 Modified: add test to all N blocks in unique target sequences, so that the subsequent analysis could treat total "n" or "N" blocks
+                                            for all blocks uniformly, don't affect the alignments
+  Version: 3.4,  Date: 2020-09-18 Modified: add $len_con_base_InterN and the N (in one block) spliting in get_pos function
+  Version: 4.0,  Date: 2020-09-21 Modified: rewrite the N spliting, so that the initial/internal N could all be deal with
+  Version: 4.1,  Date: 2020-10-04 Debug: line 473
 
 =head1 Command-line Option
 
@@ -104,19 +110,6 @@ foreach my $sp (sort keys %segment){
 
 ###sort the segments by length
     my @len_seg = sort {$len{$sp}{$b}<=>$len{$sp}{$a}} keys %{$segment{$sp}};
-    if($#len_seg==0){
-###add test to all N sequences 
-        my $tmp_out_test=$seq{$sp}{$len_seg[0]};
-        $tmp_out_test=~s/[-Nn]//g;
-        if($tmp_out_test=~/^$/){next;}
-
-        if($PosInfo eq "y"){
-            $out{$sp}=$segment{$sp}{$len_seg[0]}."\n".$seq{$sp}{$len_seg[0]};
-        }else{
-            $out{$sp}=$seq{$sp}{$len_seg[0]};
-        }
-        next;
-    }
 
     my (%match,%mismatch,%gap1,%gap2);
 ###Parsing the segment positions
@@ -136,6 +129,62 @@ foreach my $sp (sort keys %segment){
             push @{$pos_site{$i}}, ($c[0],$c[1]);
         }
     }
+
+    if($#len_seg==0){
+###add test to all N sequences
+        my $tmp_out_test=$seq{$sp}{$len_seg[0]};
+        $tmp_out_test=~s/[-Nn]//g;
+        if($tmp_out_test=~/^$/){next;}
+
+        if($PosInfo eq "y"){
+###add test to all N blocks, 20200915
+            my $tmp_t_seg;
+            my ($tj,$tk,$tj3,$tag_tn)=(0,0,0,0);
+            for(my $tn=0;$tn<length($seq{$sp}{$len_seg[0]});$tn++){
+                my $ts = substr($seq{$sp}{$len_seg[0]},$tn,1);
+                if($ts eq "-" or $ts eq "N" or $ts eq "n"){
+                    if($tk>0){
+                        for(my $j=$tj3; $j<$tj; $j+=2){
+                            my $tjn=$j/2;
+                            $tmp_t_seg.=$pos_name{0}[$tjn].":".$pos_site{0}[$j].",".$pos_site{0}[$j+1].";";
+                        }
+                        my $tjn=$tj/2;
+                        my $new_end=$pos_site{0}[$tj]+$tk;
+                        $tmp_t_seg.=$pos_name{0}[$tjn].":".$pos_site{0}[$tj].",".$new_end.";";
+                        if($pos_site{0}[$tj]+$tk == $pos_site{0}[$tj+1]){
+                            $tj+=2;
+                        }else{
+                            $pos_site{0}[$tj]=$pos_site{0}[$tj]+$tk;
+                        }
+                        $tj3=$tj;$tk=0;
+                    }
+                    if($ts eq "N" or $ts eq "n"){
+                        if($pos_site{0}[$tj+1]-$pos_site{0}[$tj] < $tk+1 and $tj<$#{$pos_site{0}}-1 ){$tk=0;$tj+=2;$pos_site{0}[$tj]++;}
+                        elsif($pos_site{0}[$tj+1]-$pos_site{0}[$tj] == $tk+1 and $tj<$#{$pos_site{0}}-1){$tk=0;$pos_site{0}[$tj]++;$tj+=2;}
+                        else{$pos_site{0}[$tj]++;} ##Identity contains N, but here is not containing N
+                        $tag_tn=1;
+                    }else{$tag_tn=0;}
+                }else{
+                    $tk++;
+                    if($pos_site{0}[$tj+1]-$pos_site{0}[$tj] < $tk and $tj<$#{$pos_site{0}}-1){$tk=1;$tj+=2;}
+                }
+            }
+            if($tk>0 or $tag_tn==1){ ##$tag_tn==1 make sure the last N blocks could be emitted to seg, than deleted by merge_pos
+                for(my $j=$tj3; $j<=$tj; $j+=2){
+                    my $jn=$j/2;
+                    $tmp_t_seg.=$pos_name{0}[$jn].":".$pos_site{0}[$j].",".$pos_site{0}[$j+1].";";
+                }
+                $tj3=$tj;
+                $tag_tn=0;
+            }
+            my $tmp_t_seg2=&merge_pos($tmp_t_seg);
+            $out{$sp}=$tmp_t_seg2."\n".$seq{$sp}{$len_seg[0]};
+        }else{
+            $out{$sp}=$seq{$sp}{$len_seg[0]};
+        }
+        next;
+    }
+
 ###identity calculating
     my %gt2;
     for(my $n=0;$n<$Ref_len;$n++){
@@ -186,7 +235,7 @@ foreach my $sp (sort keys %segment){
 
 ###$j1: $pos; $k1: extending length; $j3: last $j1 (next initial);$tag_j: last base was aligned;$tag_n: last base was N;
     my ($j1,$k1,$j3,$tag_j,$tag_n)=(0,0,0,0,0);
-    my ($len_con_base,$len_con_base_InterGap,$last_i)=(0,0,-1);
+    my ($len_con_base,$len_con_base_InterGap,$len_con_base_InterN,$last_i)=(0,0,0,-1);
 
     for(my $n=0;$n<length($seq{$sp}{$len_seg[$chosen_i]});$n++){
         my $s1 = substr($tmp_out,$n,1);
@@ -211,7 +260,8 @@ foreach my $sp (sort keys %segment){
                 }
                 if($s1 eq "N" or $s1 eq "n"){
                     if($pos_site{$chosen_i}[$j1+1]-$pos_site{$chosen_i}[$j1] < $k1+1 and $j1<$#{$pos_site{$chosen_i}}-1 ){$k1=0;$j1+=2;$pos_site{$chosen_i}[$j1]++;}
-                    elsif($pos_site{$chosen_i}[$j1+1]-$pos_site{$chosen_i}[$j1] == $k1+1 and $j1<$#{$pos_site{$chosen_i}}-1){$k1=0;$j1+=2;}
+#debug the only N blocks in coordinates, fangqi 20200507 0:50, `$pos_site{$chosen_i}[$j1]++` before `$j1+=2;`
+                    elsif($pos_site{$chosen_i}[$j1+1]-$pos_site{$chosen_i}[$j1] == $k1+1 and $j1<$#{$pos_site{$chosen_i}}-1){$k1=0;$pos_site{$chosen_i}[$j1]++;$j1+=2;}
                     else{$pos_site{$chosen_i}[$j1]++;} ##Identity contains N, but here is not containing N 
                     $tag_n=1;
                 }else{$tag_n=0;}
@@ -225,6 +275,9 @@ foreach my $sp (sort keys %segment){
 ####add judgment to the second level segments about the inter gaps(-/N)
                     if($last_i == $i){
                         $len_con_base_InterGap++;
+                        if($s2 eq "N" or $s2 eq "n"){
+                            $len_con_base_InterN++;
+                        }
                     }
                     next;
                 }else{
@@ -233,12 +286,13 @@ foreach my $sp (sort keys %segment){
                     }else{
                         $len_con_base=1;
                         $len_con_base_InterGap=0;
+                        $len_con_base_InterN=0;
                     }
                     $last_i=$i;
                     if($len_con_base>$LenV){
                         if($len_con_base==$LenV+1){
                             if($PosInfo eq "y"){
-                                my $pos_tmp = &get_pos($seq{$sp}{$len_seg[$new_order[$i]]},$segment{$sp}{$len_seg[$new_order[$i]]},$n,$LenV);
+                                my $pos_tmp = &get_pos($seq{$sp}{$len_seg[$new_order[$i]]},$segment{$sp}{$len_seg[$new_order[$i]]},$n,$LenV,$len_con_base_InterN);
                                 my @pos_all = @$pos_tmp;
                                 for(my $p=0;$p<=$#pos_all-2;$p+=3){
                                     $tmp_out_seg.=$pos_all[$p].":".$pos_all[$p+1].",".$pos_all[$p+2].";";
@@ -248,7 +302,7 @@ foreach my $sp (sort keys %segment){
                             substr($tmp_out, $n-$len_con_base-$len_con_base_InterGap+1, $len_con_base+$len_con_base_InterGap, $s2);
                         }else{
                             if($PosInfo eq "y"){
-                                my $pos_tmp = &get_pos($seq{$sp}{$len_seg[$new_order[$i]]},$segment{$sp}{$len_seg[$new_order[$i]]},$n,0);
+                                my $pos_tmp = &get_pos($seq{$sp}{$len_seg[$new_order[$i]]},$segment{$sp}{$len_seg[$new_order[$i]]},$n,0,0);
                                 my @pos_all = @$pos_tmp;
                                 for(my $p=0;$p<=$#pos_all-2;$p+=3){$tmp_out_seg.=$pos_all[$p].":".$pos_all[$p+1].",".$pos_all[$p+2].";";}
                             }
@@ -306,9 +360,12 @@ foreach my $sp (sort keys %out){
 #### subfunction for per base method
 ##################################################
 sub get_pos{
-    my ($seq,$seg,$n,$len)=@_;
+    my ($seq,$seg,$n,$len,$intN)=@_;
+    my $tmpN = $intN; ##used to present the dynamic stats of N in several blocks
+    my ($tmpG,$tmpG0) = (0,0);
     my (@pos_site,@pos_name);
     my @a = split(/;/,$seg);
+    my $len0=$len;
     foreach my $a (@a){
         my @b = split(/:/,$a);
         push @pos_name, $b[0];
@@ -317,37 +374,217 @@ sub get_pos{
     }
 
     my @tmp_pos;
-    my ($j1,$k1)=(0,0);
+    my ($j1,$k1,$k2)=(0,0,0);
     for(my $i=0; $i<=$n; $i++){
         my $s = substr($seq,$i,1);
         if($s eq "-"){
             next;
         }else{
             $k1++;
-            if($pos_site[$j1+1]-$pos_site[$j1] < $k1 and $j1<$#pos_site-1){$k1=1;$j1+=2;}
+            if($s ne "N" and $s ne "n"){$k2++;}
+            if($pos_site[$j1+1]-$pos_site[$j1] < $k1 and $j1<$#pos_site-1){
+                $k1=1;
+                if($s ne "N" and $s ne "n"){$k2=1;}else{$k2=0;}
+                $j1+=2;
+            }
         }
     }
-    if($k1>=$len+1){
-        push @tmp_pos, ($pos_name[$j1/2],$pos_site[$j1]+$k1-1-$len,$pos_site[$j1]+$k1);
-    }else{
+    if($k2>=$len+1){ ##locate in one block
+        $len=$len+1;
+        my ($tmp_no_N_len,$tmp_have_N_len,$firN,$intialN);
+        ($tmp_no_N_len,$tmp_have_N_len,$firN,$tmpN,$tmpG,$intialN)= &test_len($seq,$n,$k1,$len,0,$tmpN);
+        $tmpG0+=$tmpG;
+        $tmp_have_N_len=$tmp_have_N_len-$intialN;
+        my $tmp_start = $pos_site[$j1]+$k1-$len-$firN;
+        if($firN>0){
+            my $tmp_pos_s = &block_split(\@pos_name,\@pos_site,$seq,$tmp_start,$n,$j1,$len,$tmp_have_N_len,$firN); ##non-N total length,including-Ntotal length,N-length)
+            my @tmp_pos_a = @$tmp_pos_s;
+            push @tmp_pos, @tmp_pos_a;
+        }else{
+            push @tmp_pos, ($pos_name[$j1/2],$tmp_start,$pos_site[$j1]+$k1);
+        }
+    }else{ ##locate in several blocks
         for(my $j2=$j1;$j2>=0;$j2=$j2-2){
-            if($j2==$j1){
-                $len=$len+1-$k1;
+            if($j2==$j1){ ##first block
+                $len=$len+1-$k2;
+                my ($tmp_no_N_len,$tmp_have_N_len,$firN,$intialN);
+                ($tmp_no_N_len,$tmp_have_N_len,$firN,$tmpN,$tmpG,$intialN)= &test_len($seq,$n,$k1,$k2,0,$tmpN);
+                $tmpG0+=$tmpG;
+                my $tmp_start = $pos_site[$j2]+$k1-$k2-$firN;
+                $tmp_have_N_len=$tmp_have_N_len-$intialN;
                 if($k1==$pos_site[$j2+1]-$pos_site[$j2]){
-                    unshift @tmp_pos, ($pos_name[$j2/2],$pos_site[$j2],$pos_site[$j2+1]);
+                    if($firN>0){
+                        my $tmp_pos_s = &block_split(\@pos_name,\@pos_site,$seq,$tmp_start,$n,$j2,$k2,$tmp_have_N_len,$firN);
+                        my @tmp_pos_a = @$tmp_pos_s;
+                        unshift @tmp_pos, @tmp_pos_a;
+                    }else{
+                        unshift @tmp_pos, ($pos_name[$j2/2],$tmp_start,$pos_site[$j2+1]);
+                    }
                 }else{
-                    unshift @tmp_pos, ($pos_name[$j2/2],$pos_site[$j2],$pos_site[$j2]+$k1);
+                    if($firN>0){
+                        my $tmp_pos_s = &block_split(\@pos_name,\@pos_site,$seq,$tmp_start,$n,$j2,$k2,$tmp_have_N_len,$firN);
+                        my @tmp_pos_a = @$tmp_pos_s;
+                        unshift @tmp_pos, @tmp_pos_a;
+                    }else{
+                        unshift @tmp_pos, ($pos_name[$j2/2],$tmp_start,$tmp_start+$k2+$firN);
+                    }
                 }
             }else{
-                if($len<=($pos_site[$j2+1]-$pos_site[$j2])){
-                    unshift @tmp_pos, ($pos_name[$j2/2],$pos_site[$j2+1]-$len,$pos_site[$j2+1]);
-                    last;
-                }else{
-                    unshift @tmp_pos, ($pos_name[$j2/2],$pos_site[$j2],$pos_site[$j2+1]);
-                    $len=$len-($pos_site[$j2+1]-$pos_site[$j2]);
+                if($len<=($pos_site[$j2+1]-$pos_site[$j2])){ ## end block or multiple-N blocks
+                    my $tmp_n = $n-$len0-1-$intN-$tmpG0+$len+$tmpN; ##$len0 need to add 1, so minus 1 here
+                    $tmpG=&test_intelGap($seq,$tmp_n);
+                    $tmpG0+=$tmpG;
+                    $tmp_n = $n-$len0-1-$intN-$tmpG0+$len+$tmpN;
+                    my $tmp_len = $pos_site[$j2+1]-$pos_site[$j2];
+                    my ($tmp_no_N_len,$tmp_have_N_len,$firN,$intialN);
+                    ($tmp_no_N_len,$tmp_have_N_len,$firN,$tmpN,$tmpG,$intialN)= &test_len($seq,$tmp_n,0,$len,$tmp_len,$tmpN);
+                    $tmpG0+=$tmpG;
+                    $tmp_have_N_len=$tmp_have_N_len-$intialN;
+                    if($firN>0 and $tmp_len==$firN){
+                        next;
+                    }elsif($firN>0){
+                        my $tmp_start = $pos_site[$j2+1]-$tmp_no_N_len-$firN;
+                        $tmp_len = $firN+$tmp_no_N_len;
+                        my $tmp_pos_s = &block_split(\@pos_name,\@pos_site,$seq,$tmp_start,$tmp_n,$j2,$tmp_no_N_len,$tmp_have_N_len,$firN);
+                        my @tmp_pos_a = @$tmp_pos_s;
+                        unshift @tmp_pos, @tmp_pos_a;
+                    }else{
+                        unshift @tmp_pos, ($pos_name[$j2/2],$pos_site[$j2+1]-$tmp_no_N_len,$pos_site[$j2+1]);
+                    }
+                    $len=$len-$tmp_no_N_len;
+                    if($len==0){last;}elsif($len<0){print STDERR "Wrong with \$len in $pos_name[$j2/2]:$n:$Input\n";}
+                }else{ ## intel blocks
+                    my $tmp_len = $pos_site[$j2+1]-$pos_site[$j2];
+                    my $tmp_n = $n-($len0+1+$intN+$tmpG0-$len-$tmpN);
+                    $tmpG=&test_intelGap($seq,$tmp_n);
+                    $tmpG0+=$tmpG;
+                    $tmp_n = $n-($len0+1+$intN+$tmpG0-$len-$tmpN);
+                    my ($tmp_no_N_len,$tmp_have_N_len,$firN,$intialN);
+                    ($tmp_no_N_len,$tmp_have_N_len,$firN,$tmpN,$tmpG,$intialN)= &test_len($seq,$tmp_n,$tmp_len,0,$tmp_len,$tmpN);
+                    $tmpG0+=$tmpG;
+                    my $tmp_start = $pos_site[$j2]+$intialN;
+                    if($firN>0){
+                        my $tmp_pos_s = &block_split(\@pos_name,\@pos_site,$seq,$tmp_start,$tmp_n,$j2,$tmp_no_N_len,$tmp_len,$firN);
+                        my @tmp_pos_a = @$tmp_pos_s;
+                        unshift @tmp_pos, @tmp_pos_a;
+                    }else{
+                        unshift @tmp_pos, ($pos_name[$j2/2],$tmp_start,$pos_site[$j2+1]);
+                    }
+                    $len=$len-$tmp_no_N_len; #debug $len=$len-($pos_site[$j2+1]-$pos_site[$j2]); at 20201004
                 }
             }
         }
+    }
+    return(\@tmp_pos);
+}
+
+sub test_intelGap{
+    my ($seq,$n)=@_;
+    my $gaps=0;
+    for(my $i=$n; $i>=0; $i--){
+        my $s = substr($seq,$i,1);
+        if($s eq '-'){
+            $gaps++;
+        }else{
+            last;
+        }
+    }
+    return($gaps);
+}
+
+sub test_len{
+    my ($seq,$n,$block_len,$tmp_no_N_len,$tmp_have_N_len,$tmpN)=@_;
+    my $tag;
+    my ($intialN_tag,$intialN)=(0,0);
+    my ($firN,$gaps)=(0,0);
+    if($tmp_no_N_len==0){$tag=0;}else{$tag=1;}
+    if($block_len==0){
+        my ($tmp_no_N_len0,$tmp_have_N_len0) = ($tmp_no_N_len,$tmp_have_N_len);
+        ($tmp_no_N_len,$tmp_have_N_len)=(0,0);
+        for(my $i=$n; $i>=0; $i--){
+            my $s = substr($seq,$i,1);
+            if($s ne '-'){
+                $tmp_have_N_len++; 
+                if($s ne 'N' and $s ne 'n'){
+                    $tmp_no_N_len++;
+                }elsif($s eq 'N' or $s eq 'n'){
+                    $firN++;$tmpN--;
+                }
+            }else{$gaps++;}
+            if($tmp_no_N_len0==$tmp_no_N_len or $tmp_have_N_len0==$tmp_have_N_len){last;}
+        }
+    }else{
+        my $hill=0;
+        for(my $i=$n; $i>=0; $i--){
+            my $s = substr($seq,$i,1);
+            if($intialN_tag>0){
+                if($s eq 'n' or $s eq 'N'){$tmpN--;$tmp_have_N_len++;$intialN++;}
+                elsif($s ne '-'){last;}
+                else{$gaps++;}
+            }else{
+                if($s ne '-'){
+                    $tmp_have_N_len++, if($tag==1);
+                    $hill++, if($tag==0);
+                    if($s ne 'N' and $s ne 'n'){
+                        $tmp_no_N_len++, if($tag==0);
+                        $hill++, if($tag==1);
+                    }elsif($s eq 'N' or $s eq 'n'){
+                        $firN++;$tmpN--;
+                    }
+                }else{$gaps++;}
+            }
+            if($tmp_have_N_len!=$block_len and (($tag==1 and $hill==$tmp_no_N_len) or ($tag==0 and $hill==$tmp_have_N_len))){$intialN_tag++;}
+            if($tmp_have_N_len==$block_len and (($tag==1 and $hill==$tmp_no_N_len) or ($tag==0 and $hill==$tmp_have_N_len))){last;}
+        }
+    }
+    return($tmp_no_N_len,$tmp_have_N_len,$firN,$tmpN,$gaps,$intialN);
+}
+
+sub block_split{
+    my ($pos_name,$pos_site,$seq,$tmp_start,$n,$j1,$len,$lenWN,$intN)=@_;
+    my @pos_name = @$pos_name;
+    my @pos_site = @$pos_site;
+    my @tmp_pos;
+    my ($tmp_start0,$k2)=($tmp_start,0);
+
+    ##get the no gaps start
+    my ($effect_len,$aln_len,$tag_N)=(0,0,0);
+    my $tmpN = $intN;
+    for(my $i=$n; $i>=0; $i--){
+        $aln_len++;
+        my $s = substr($seq,$i,1);
+        if($s eq "N" or $s eq "n"){
+            if($tmpN <= 0){print STDERR "Wrong with \$tmpN in $pos_name[$j1/2]:$tmpN:$n:$i:$tmp_start:$Input\n";last;}
+            else{
+                $tag_N++;
+                $tmpN--;
+                $effect_len++;
+            }
+        }elsif($s ne "-"){
+            $effect_len++;
+        }
+
+        if($effect_len==$lenWN){last;}
+    }
+
+    if($tag_N==0){
+        push @tmp_pos, ($pos_name[$j1/2],$tmp_start0,$tmp_start0+$len);
+    }else{
+        my $n2=0; ##count the sequential Ns
+        for(my $i=$n-$aln_len+1; $i<=$n; $i++){ ##$i=$n-$len-1-$intN is wrong, because the count of $len_con_base is based on 1, the id of them is based on 0
+            my $s = substr($seq,$i,1);
+            if($s eq "N" or $s eq "n"){
+                push @tmp_pos, ($pos_name[$j1/2],$tmp_start0,$tmp_start0+$k2);
+                if($k2==0){$tmp_start0++;}
+                else{$tmp_start0=$tmp_start0+$k2+1;}
+                $k2=0;
+            }elsif($s eq "-"){
+                next;
+            }else{
+                $k2++;
+            }
+        }
+        push @tmp_pos, ($pos_name[$j1/2],$tmp_start0,$tmp_start0+$k2);
     }
     return(\@tmp_pos);
 }
@@ -370,6 +607,8 @@ sub merge_pos{
             if($pos_name[$jn] eq $pos_name[$jn+1]){
                 if($pos_site[$i+1] == $pos_site[$i+2]){
                     $pos_site[$i+2]=$pos_site[$i];
+                }elsif($pos_site[$i+1] == $pos_site[$i]){ ##debug the only N blocks in coordinates, fangqi 20200507 0:50
+                    next;
                 }else{
                     $seg_new.=$pos_name[$jn].":".$pos_site[$i].",".$pos_site[$i+1].";";
                 }
@@ -378,7 +617,9 @@ sub merge_pos{
             }
         }
         $jn = $i/2;
-        $seg_new.=$pos_name[$jn].":".$pos_site[$i].",".$pos_site[$i+1].";";
+        unless($pos_site[$i+1] == $pos_site[$i]){ ##debug the only N blocks in coordinates, fangqi 20200507 14:40
+            $seg_new.=$pos_name[$jn].":".$pos_site[$i].",".$pos_site[$i+1].";";
+        }
     }else{
         $seg_new=$pos_name[0].":".$pos_site[0].",".$pos_site[1].";";
     }

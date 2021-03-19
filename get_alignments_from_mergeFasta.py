@@ -64,4 +64,4 @@ if __name__=='__main__':
     ref = sys.argv[2]
     tar = sys.argv[3]
     alignments=get_alignments(fasta_file,ref,tar)
-    print '\n'.join(alignments)
+    print ('\n'.join(alignments))
