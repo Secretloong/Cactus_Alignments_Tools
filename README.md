@@ -1,5 +1,7 @@
 # Cactus_Alignments_Tools
-The toolbox used to deal with cactus whole genome alignments
+The toolbox used to deal with cactus whole genome alignments. Because the efficiency of perl is limitted, I am happy to work with any person how would like to improve this pipeline. 
+
+BTW, one anthoer tool, [halSynteny](https://github.com/ComparativeGenomicsToolkit/hal.git) would also be a good way to extracted the reasonable single copy alignments by a pairwise way. Here my pipeline support a chance to deal with all synteny chain based on one uniq reference species.
 
 Requirement:
 https://github.com/ComparativeGenomicsToolkit/hal.git
